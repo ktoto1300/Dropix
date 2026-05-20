@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dropix — P2P Transfer</title>
+    <meta name="theme-color" content="#2ecc71">
+    
+    <!-- Библиотеки -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    
+    <style>
+        :root { --primary: #2ecc71; --accent: #3498db; --text: #2c3e50; }
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            margin: 0; padding: 0; height: 100vh;
+            display: flex; justify-content: center; align-items: center;
+            overflow: hidden; background-color: #f8f9fa;
+        }
+
+        /* Фон с пятнами */
+        .bg-blobs { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; filter: blur(80px); background: #fff; }
+        .blob { position: absolute; width: 600px; height: 600px; border-radius: 50%; opacity: 0.5; animation: move 25s infinite alternate ease-in-out; }
+        .blob-1 { background: #85e3ff; top: -10%; left: -10%; }
+        .blob-2 { background: #ace7ff; bottom: -10%; right: -10%; animation-delay: -5s; }
+        .blob-3 { background: #d3f9d8; top: 40%; left: 50%; animation-delay: -10s; }
+        .blob-4 { background: #f8bbd0; bottom: 20%; left: 10%; animation-delay: -15s; }
+        @keyframes move { from { transform: translate(0, 0); } to { transform: translate(150px, 100px); } }
+
+        .card {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(20px);
+            padding: 2.5rem; border-radius: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.05);
+            width: 90%; max-width: 400px; text-align: center; z-index: 10;
+        }
+
+        .header h1 { margin: 0; font-size: 1.8rem; color: var(--text); font-weight: 900; }
+        
+        #qr-canvas { 
+            margin: 1.5rem auto; 
+            display: block; 
+            width: 200px; height: 200px;
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #eee;
+        }
+        
+        .code-display { font-size: 2.5rem; font-weight: 800; letter-spacing: 5px; margin-bottom: 1.5rem; color: var(--text); }
+
+        .btn {
+            display: block; width: 100%; padding: 18px;
+            border-radius: 20px; border: none; font-size: 1rem;
+            font-weight: 700; cursor: pointer; margin-bottom: 12px;
+            transition: 0.2s;
+        }
+        .btn-main { background: var(--primary); color: white; }
+        .btn-sec { background: white; color: #555; border: 2px solid #f0f0f0; }
+        .btn-link { background: transparent; color: #999; text-decoration: underline; font-size: 0.85rem; }
+
+        .progress-container { margin-top: 15px; background: rgba(0,0,0,0.03); padding: 20px; border-radius: 24px; }
+        .progress-bar-bg { height: 8px; background: #eee; border-radius: 10px; overflow: hidden; margin: 10px 0; }
+        .progress-bar-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.1s; }
+        
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4); backdrop-filter: blur(8px);
+            display: none; justify-content: center; align-items: center; z-index: 1000;
+        }
+        .modal-content { background: white; padding: 2rem; border-radius: 30px; width: 85%; max-width: 320px; text-align: center; }
+        .pin-inputs { display: flex; gap: 8px; justify-content: center; margin: 1.5rem 0; }
+        .pin-cell { width: 35px; height: 50px; border: 2px solid #eee; border-radius: 10px; text-align: center; font-size: 1.5rem; font-weight: 800; }
+
+        #scanner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; display: none; }
+        .toast {
+            position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%);
+            background: #1a1a1a; color: white; padding: 16px 32px;
+            border-radius: 24px; z-index: 3000; transition: 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
+        .toast.show { bottom: 40px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="bg-blobs">
+    <div class="blob blob-1"></div><div class="blob blob-2"></div>
+    <div class="blob blob-3"></div><div class="blob blob-4"></div>
+</div>
+
+<div class="card">
+    <div class="header"><h1>Dropix</h1></div>
+    <canvas id="qr-canvas"></canvas>
+    <div class="code-display" id="myCode">------</div>
+    
+    <button class="btn btn-main" onclick="showScanner()">Отсканировать QR</button>
+    <button class="btn btn-sec" onclick="showPinModal()">Ввести код</button>
+    
+    <div id="transfer-ui" class="hidden">
+        <div class="progress-container">
+            <div id="status-label" style="font-weight:600; color:#666;">Готов</div>
+            <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+            <button class="btn btn-main" style="background:var(--accent);" onclick="document.getElementById('fileInput').click()">Выбрать файл</button>
+        </div>
+    </div>
+    
+    <button class="btn btn-link" onclick="copyDropLink()">Скопировать ссылку</button>
+    <input type="file" id="fileInput" class="hidden">
+</div>
+
+<div class="modal-overlay" id="pinModal">
+    <div class="modal-content">
+        <h3>Код Dropix</h3>
+        <div class="pin-inputs">
+            <input type="number" class="pin-cell" oninput="moveNext(this, 0)">
+            <input type="number" class="pin-cell" oninput="moveNext(this, 1)">
+            <input type="number" class="pin-cell" oninput="moveNext(this, 2)">
+            <input type="number" class="pin-cell" oninput="moveNext(this, 3)">
+            <input type="number" class="pin-cell" oninput="moveNext(this, 4)">
+            <input type="number" class="pin-cell" oninput="moveNext(this, 5)">
+        </div>
+        <button class="btn btn-main" onclick="confirmPin()">Подключиться</button>
+        <button class="btn btn-link" onclick="hidePinModal()">Отмена</button>
+    </div>
+</div>
+
+<div id="scanner-overlay">
+    <div id="reader" style="width:100%; height:100%;"></div>
+    <div style="position:absolute; bottom:40px; width:100%; display:flex; justify-content:center; gap:20px;">
+        <button class="btn btn-sec" style="width:60px;" onclick="stopScanner()">✕</button>
+        <button class="btn btn-sec" style="width:60px;" onclick="document.getElementById('qrFileInput').click()">📁</button>
+    </div>
+    <input type="file" id="qrFileInput" accept="image/*" class="hidden">
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    const CHUNK_SIZE = 16384;
+    const PIN = Math.floor(100000 + Math.random() * 900000).toString();
+    const peer = new Peer('dropix-' + PIN);
+    
+    let connection = null;
+    let html5QrCode = null;
+    let incomingFile = { name: '', type: '', size: 0, chunks: [], received: 0 };
+
+    document.getElementById('myCode').innerText = PIN;
+
+    function showToast(msg) {
+        const t = document.getElementById('toast');
+        t.innerText = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    // Рендер QR
+    function renderQR() {
+        if (typeof QRious === 'undefined') {
+            setTimeout(renderQR, 100);
+            return;
+        }
+        try {
+            const baseUrl = window.location.href.split('?')[0];
+            const fullLink = baseUrl + "?join=" + PIN;
+            new QRious({
+                element: document.getElementById('qr-canvas'),
+                value: fullLink,
+                size: 200,
+                level: 'M'
+            });
+            console.log("QR Rendered for:", fullLink);
+        } catch(e) { console.error("QR Error", e); }
+    }
+
+    peer.on('open', (id) => {
+        renderQR();
+        // Авто-подключение по параметру join
+        const urlParams = new URLSearchParams(window.location.search);
+        const joinId = urlParams.get('join');
+        if (joinId && joinId !== PIN) {
+            // Небольшая задержка, чтобы PeerJS сервер успел зарегистрировать нас
+            setTimeout(() => {
+                console.log("Attempting auto-connect to:", joinId);
+                connectToPeer(joinId);
+            }, 500);
+        }
+    });
+
+    peer.on('connection', (conn) => {
+        connection = conn;
+        setupConn();
+        showToast("Устройство подключено!");
+    });
+
+    function setupConn() {
+        document.getElementById('transfer-ui').classList.remove('hidden');
+        connection.on('data', (data) => {
+            if (data.type === 'metadata') {
+                incomingFile = { name: data.name, type: data.mime, size: data.size, chunks: [], received: 0 };
+            } else if (data.type === 'chunk') {
+                incomingFile.chunks.push(data.chunk);
+                incomingFile.received += data.chunk.byteLength;
+                const p = Math.floor((incomingFile.received / incomingFile.size) * 100);
+                updateP(p, `Получение: ${p}%`);
+            } else if (data.type === 'eof') {
+                const blob = new Blob(incomingFile.chunks, { type: incomingFile.type });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = incomingFile.name;
+                a.click();
+                showToast("Файл получен!");
+            }
+        });
+    }
+
+    async function sendFile(file) {
+        if (!connection) return;
+        connection.send({ type: 'metadata', name: file.name, mime: file.type, size: file.size });
+        let offset = 0;
+        while (offset < file.size) {
+            const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+            connection.send({ type: 'chunk', chunk: chunk });
+            offset += CHUNK_SIZE;
+            const p = Math.floor((offset / file.size) * 100);
+            updateP(p, `Отправка: ${p}%`);
+            if (offset % (CHUNK_SIZE * 20) === 0) await new Promise(r => setTimeout(r, 10));
+        }
+        connection.send({ type: 'eof' });
+        showToast("Отправлено!");
+    }
+
+    function updateP(v, t) {
+        document.getElementById('progress-fill').style.width = v + '%';
+        document.getElementById('status-label').innerText = t;
+    }
+
+    function connectToPeer(id) {
+        showToast("Подключение к " + id + "...");
+        connection = peer.connect('dropix-' + id, { reliable: true });
+        connection.on('open', () => {
+            setupConn();
+            showToast("Готов к передаче!");
+        });
+        connection.on('error', (e) => {
+            console.error("Conn error:", e);
+            showToast("Ошибка подключения");
+        });
+    }
+
+    function showPinModal() { document.getElementById('pinModal').style.display = 'flex'; }
+    function hidePinModal() { document.getElementById('pinModal').style.display = 'none'; }
+    function moveNext(el, i) { if (el.value.length === 1 && i < 5) document.querySelectorAll('.pin-cell')[i+1].focus(); }
+    function confirmPin() {
+        const pin = Array.from(document.querySelectorAll('.pin-cell')).map(i => i.value).join('');
+        if (pin.length === 6) { hidePinModal(); connectToPeer(pin); }
+    }
+
+    function copyDropLink() {
+        const baseUrl = window.location.href.split('?')[0];
+        const url = baseUrl + "?join=" + PIN;
+        navigator.clipboard.writeText(url).then(() => showToast("Ссылка скопирована!"));
+    }
+
+    function showScanner() {
+        document.getElementById('scanner-overlay').style.display = 'block';
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
+            try {
+                const url = new URL(text);
+                const id = url.searchParams.get('join');
+                if (id) { stopScanner(); connectToPeer(id); }
+            } catch(e) { showToast("Неверный QR"); }
+        }).catch(() => showToast("Ошибка камеры"));
+    }
+    function stopScanner() { if (html5QrCode) html5QrCode.stop().then(() => document.getElementById('scanner-overlay').style.display = 'none'); }
+
+    document.getElementById('fileInput').onchange = (e) => { if (e.target.files[0]) sendFile(e.target.files[0]); };
+    document.getElementById('qrFileInput').onchange = (e) => {
+        new Html5Qrcode("reader").scanFile(e.target.files[0], true).then(text => {
+            try {
+                const id = new URL(text).searchParams.get('join');
+                if (id) { stopScanner(); connectToPeer(id); }
+            } catch(e) {}
+        });
+    };
+</script>
+
+</body>
+</html>
