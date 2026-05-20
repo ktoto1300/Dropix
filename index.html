@@ -19,7 +19,6 @@
             overflow: hidden; background-color: #f8f9fa;
         }
 
-        /* Фон с пятнами */
         .bg-blobs { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; filter: blur(80px); background: #fff; }
         .blob { position: absolute; width: 600px; height: 600px; border-radius: 50%; opacity: 0.5; animation: move 25s infinite alternate ease-in-out; }
         .blob-1 { background: #85e3ff; top: -10%; left: -10%; }
@@ -39,12 +38,8 @@
         .header h1 { margin: 0; font-size: 1.8rem; color: var(--text); font-weight: 900; }
         
         #qr-canvas { 
-            margin: 1.5rem auto; 
-            display: block; 
-            width: 200px; height: 200px;
-            background: #fff;
-            border-radius: 12px;
-            border: 1px solid #eee;
+            margin: 1.5rem auto; display: block; width: 200px; height: 200px;
+            background: #fff; border-radius: 12px; border: 1px solid #eee;
         }
         
         .code-display { font-size: 2.5rem; font-weight: 800; letter-spacing: 5px; margin-bottom: 1.5rem; color: var(--text); }
@@ -52,8 +47,7 @@
         .btn {
             display: block; width: 100%; padding: 18px;
             border-radius: 20px; border: none; font-size: 1rem;
-            font-weight: 700; cursor: pointer; margin-bottom: 12px;
-            transition: 0.2s;
+            font-weight: 700; cursor: pointer; margin-bottom: 12px; transition: 0.2s;
         }
         .btn-main { background: var(--primary); color: white; }
         .btn-sec { background: white; color: #555; border: 2px solid #f0f0f0; }
@@ -69,8 +63,15 @@
             display: none; justify-content: center; align-items: center; z-index: 1000;
         }
         .modal-content { background: white; padding: 2rem; border-radius: 30px; width: 85%; max-width: 320px; text-align: center; }
+        
         .pin-inputs { display: flex; gap: 8px; justify-content: center; margin: 1.5rem 0; }
-        .pin-cell { width: 35px; height: 50px; border: 2px solid #eee; border-radius: 10px; text-align: center; font-size: 1.5rem; font-weight: 800; }
+        /* Исправление ячеек: центрируем текст и убираем стандартные стили цифр */
+        .pin-cell { 
+            width: 35px; height: 50px; border: 2px solid #eee; border-radius: 10px; 
+            text-align: center; font-size: 1.5rem; font-weight: 800; outline: none;
+            caret-color: transparent; /* прячем курсор для красоты */
+        }
+        .pin-cell:focus { border-color: var(--primary); background: #f0fff4; }
 
         #scanner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; display: none; }
         .toast {
@@ -113,12 +114,12 @@
     <div class="modal-content">
         <h3>Код Dropix</h3>
         <div class="pin-inputs">
-            <input type="number" class="pin-cell" oninput="moveNext(this, 0)">
-            <input type="number" class="pin-cell" oninput="moveNext(this, 1)">
-            <input type="number" class="pin-cell" oninput="moveNext(this, 2)">
-            <input type="number" class="pin-cell" oninput="moveNext(this, 3)">
-            <input type="number" class="pin-cell" oninput="moveNext(this, 4)">
-            <input type="number" class="pin-cell" oninput="moveNext(this, 5)">
+            <input type="text" inputmode="numeric" maxlength="1" class="pin-cell" oninput="moveNext(this, 0)" onkeydown="handleKey(event, 0)">
+            <input type="text" inputmode="numeric" maxlength="1" class="pin-cell" oninput="moveNext(this, 1)" onkeydown="handleKey(event, 1)">
+            <input type="text" inputmode="numeric" maxlength="1" class="pin-cell" oninput="moveNext(this, 2)" onkeydown="handleKey(event, 2)">
+            <input type="text" inputmode="numeric" maxlength="1" class="pin-cell" oninput="moveNext(this, 3)" onkeydown="handleKey(event, 3)">
+            <input type="text" inputmode="numeric" maxlength="1" class="pin-cell" oninput="moveNext(this, 4)" onkeydown="handleKey(event, 4)">
+            <input type="text" inputmode="numeric" maxlength="1" class="pin-cell" oninput="moveNext(this, 5)" onkeydown="handleKey(event, 5)">
         </div>
         <button class="btn btn-main" onclick="confirmPin()">Подключиться</button>
         <button class="btn btn-link" onclick="hidePinModal()">Отмена</button>
@@ -139,7 +140,16 @@
 <script>
     const CHUNK_SIZE = 16384;
     const PIN = Math.floor(100000 + Math.random() * 900000).toString();
-    const peer = new Peer('dropix-' + PIN);
+    
+    // Исправление: добавили STUN серверы Google для пробития сети
+    const peer = new Peer('dropix-' + PIN, {
+        config: {
+            'iceServers': [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        }
+    });
     
     let connection = null;
     let html5QrCode = null;
@@ -154,48 +164,29 @@
         setTimeout(() => t.classList.remove('show'), 3000);
     }
 
-    // ИСПРАВЛЕНИЕ: Рисуем QR сразу, не дожидаясь ответа от сервера PeerJS
     function renderQR() {
         if (typeof QRious === 'undefined') {
-            setTimeout(renderQR, 50); // Если библиотека не успела загрузиться, проверяем каждые 50мс
+            setTimeout(renderQR, 50);
             return;
         }
         try {
             let baseUrl = window.location.href.split('?')[0];
-            // Защита от локальных путей (чтобы QR не ломался при открытии файла напрямую)
-            if (baseUrl.startsWith('file://')) {
-                baseUrl = 'https://ktoto1300.github.io/Dropix/';
-            }
-            const fullLink = baseUrl + "?join=" + PIN;
-            
-            new QRious({
-                element: document.getElementById('qr-canvas'),
-                value: fullLink,
-                size: 200,
-                level: 'M'
-            });
-        } catch(e) { 
-            console.error("QR Error", e); 
-        }
+            if (baseUrl.startsWith('file://')) baseUrl = 'https://ktoto1300.github.io/Dropix/';
+            new QRious({ element: document.getElementById('qr-canvas'), value: baseUrl + "?join=" + PIN, size: 200, level: 'M' });
+        } catch(e) {}
     }
 
-    // Вызываем отрисовку моментально
     renderQR();
 
     peer.on('open', (id) => {
-        // Авто-подключение по параметру join
         const urlParams = new URLSearchParams(window.location.search);
         const joinId = urlParams.get('join');
-        if (joinId && joinId !== PIN) {
-            setTimeout(() => {
-                connectToPeer(joinId);
-            }, 500);
-        }
+        if (joinId && joinId !== PIN) setTimeout(() => connectToPeer(joinId), 500);
     });
 
     peer.on('error', (err) => {
-        console.error(err);
-        showToast("Ошибка сети: проверь интернет");
+        console.error("PeerJS Error:", err);
+        showToast("Ошибка сети: не удалось подключиться");
     });
 
     peer.on('connection', (conn) => {
@@ -231,19 +222,13 @@
         if (!connection) return;
         connection.send({ type: 'metadata', name: file.name, mime: file.type, size: file.size });
         let offset = 0;
-        
         while (offset < file.size) {
             const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
             connection.send({ type: 'chunk', chunk: chunk });
             offset += CHUNK_SIZE;
-            
             const p = Math.floor((offset / file.size) * 100);
             updateP(p, `Отправка: ${p}%`);
-            
-            // Защита от зависания вкладки при отправке тяжелых видео
-            if (offset % (CHUNK_SIZE * 50) === 0) {
-                await new Promise(r => setTimeout(r, 5));
-            }
+            if (offset % (CHUNK_SIZE * 50) === 0) await new Promise(r => setTimeout(r, 5));
         }
         connection.send({ type: 'eof' });
         showToast("Отправлено!");
@@ -256,31 +241,47 @@
     }
 
     function connectToPeer(id) {
-        showToast("Подключение к " + id + "...");
+        showToast("Поиск устройства...");
         connection = peer.connect('dropix-' + id, { reliable: true });
         connection.on('open', () => {
             setupConn();
             showToast("Готов к передаче!");
         });
         connection.on('error', (e) => {
-            console.error("Conn error:", e);
             showToast("Ошибка подключения");
         });
     }
 
-    function showPinModal() { document.getElementById('pinModal').style.display = 'flex'; }
+    /* Исправление: Логика ПИН-кода (ввод только цифр + удаление Backspace'ом) */
+    function showPinModal() { 
+        document.getElementById('pinModal').style.display = 'flex'; 
+        setTimeout(() => document.querySelectorAll('.pin-cell')[0].focus(), 100);
+    }
     function hidePinModal() { document.getElementById('pinModal').style.display = 'none'; }
-    function moveNext(el, i) { if (el.value.length === 1 && i < 5) document.querySelectorAll('.pin-cell')[i+1].focus(); }
+    
+    function moveNext(el, i) { 
+        el.value = el.value.replace(/[^0-9]/g, ''); // режем все кроме цифр
+        if (el.value.length === 1 && i < 5) document.querySelectorAll('.pin-cell')[i+1].focus();
+    }
+    
+    function handleKey(e, i) {
+        if (e.key === 'Backspace' && e.target.value === '' && i > 0) {
+            const cells = document.querySelectorAll('.pin-cell');
+            cells[i-1].focus();
+            cells[i-1].value = '';
+        }
+    }
+
     function confirmPin() {
         const pin = Array.from(document.querySelectorAll('.pin-cell')).map(i => i.value).join('');
         if (pin.length === 6) { hidePinModal(); connectToPeer(pin); }
+        else { showToast("Введите все 6 цифр!"); }
     }
 
     function copyDropLink() {
         let baseUrl = window.location.href.split('?')[0];
         if (baseUrl.startsWith('file://')) baseUrl = 'https://ktoto1300.github.io/Dropix/';
-        const url = baseUrl + "?join=" + PIN;
-        navigator.clipboard.writeText(url).then(() => showToast("Ссылка скопирована!"));
+        navigator.clipboard.writeText(baseUrl + "?join=" + PIN).then(() => showToast("Ссылка скопирована!"));
     }
 
     function showScanner() {
@@ -288,21 +289,14 @@
         html5QrCode = new Html5Qrcode("reader");
         html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
             try {
-                const url = new URL(text);
-                const id = url.searchParams.get('join');
+                const id = new URL(text).searchParams.get('join');
                 if (id) { stopScanner(); connectToPeer(id); }
             } catch(e) { showToast("Неверный QR"); }
         }).catch(() => showToast("Ошибка камеры"));
     }
     
     function stopScanner() { 
-        if (html5QrCode) {
-            html5QrCode.stop().then(() => {
-                document.getElementById('scanner-overlay').style.display = 'none';
-            }).catch(() => {
-                document.getElementById('scanner-overlay').style.display = 'none';
-            });
-        }
+        if (html5QrCode) html5QrCode.stop().then(() => document.getElementById('scanner-overlay').style.display = 'none').catch(() => document.getElementById('scanner-overlay').style.display = 'none'); 
     }
 
     document.getElementById('fileInput').onchange = (e) => { if (e.target.files[0]) sendFile(e.target.files[0]); };
