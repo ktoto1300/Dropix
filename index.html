@@ -28,25 +28,18 @@
         @keyframes move { from { transform: translate(0, 0); } to { transform: translate(150px, 100px); } }
 
         .card {
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(20px);
-            padding: 2.5rem; border-radius: 40px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.05);
+            background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(20px);
+            padding: 2.5rem; border-radius: 40px; box-shadow: 0 20px 60px rgba(0,0,0,0.05);
             width: 90%; max-width: 400px; text-align: center; z-index: 10;
         }
 
         .header h1 { margin: 0; font-size: 1.8rem; color: var(--text); font-weight: 900; }
         
-        #qr-canvas { 
-            margin: 1.5rem auto; display: block; width: 200px; height: 200px;
-            background: #fff; border-radius: 12px; border: 1px solid #eee;
-        }
-        
+        #qr-canvas { margin: 1.5rem auto; display: block; width: 200px; height: 200px; background: #fff; border-radius: 12px; border: 1px solid #eee; }
         .code-display { font-size: 2.5rem; font-weight: 800; letter-spacing: 5px; margin-bottom: 1.5rem; color: var(--text); }
 
         .btn {
-            display: block; width: 100%; padding: 18px;
-            border-radius: 20px; border: none; font-size: 1rem;
+            display: block; width: 100%; padding: 18px; border-radius: 20px; border: none; font-size: 1rem;
             font-weight: 700; cursor: pointer; margin-bottom: 12px; transition: 0.2s;
         }
         .btn-main { background: var(--primary); color: white; }
@@ -65,12 +58,7 @@
         .modal-content { background: white; padding: 2rem; border-radius: 30px; width: 85%; max-width: 320px; text-align: center; }
         
         .pin-inputs { display: flex; gap: 8px; justify-content: center; margin: 1.5rem 0; }
-        /* Исправление ячеек: центрируем текст и убираем стандартные стили цифр */
-        .pin-cell { 
-            width: 35px; height: 50px; border: 2px solid #eee; border-radius: 10px; 
-            text-align: center; font-size: 1.5rem; font-weight: 800; outline: none;
-            caret-color: transparent; /* прячем курсор для красоты */
-        }
+        .pin-cell { width: 35px; height: 50px; border: 2px solid #eee; border-radius: 10px; text-align: center; font-size: 1.5rem; font-weight: 800; outline: none; caret-color: transparent; }
         .pin-cell:focus { border-color: var(--primary); background: #f0fff4; }
 
         #scanner-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; display: none; }
@@ -81,6 +69,13 @@
         }
         .toast.show { bottom: 40px; }
         .hidden { display: none; }
+        
+        /* Индикатор онлайна */
+        .status-dot {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            background: #e74c3c; margin-right: 8px; transition: 0.3s;
+        }
+        .status-dot.online { background: #2ecc71; box-shadow: 0 0 8px #2ecc71; }
     </style>
 </head>
 <body>
@@ -91,7 +86,9 @@
 </div>
 
 <div class="card">
-    <div class="header"><h1>Dropix</h1></div>
+    <div class="header">
+        <h1><span class="status-dot" id="online-dot"></span>Dropix</h1>
+    </div>
     <canvas id="qr-canvas"></canvas>
     <div class="code-display" id="myCode">------</div>
     
@@ -128,7 +125,7 @@
 
 <div id="scanner-overlay">
     <div id="reader" style="width:100%; height:100%;"></div>
-    <div style="position:absolute; bottom:40px; width:100%; display:flex; justify-content:center; gap:20px;">
+    <div style="position:absolute; bottom:40px; width:100%; display:flex; justify-content:center; gap:20px; z-index:2100;">
         <button class="btn btn-sec" style="width:60px;" onclick="stopScanner()">✕</button>
         <button class="btn btn-sec" style="width:60px;" onclick="document.getElementById('qrFileInput').click()">📁</button>
     </div>
@@ -141,12 +138,16 @@
     const CHUNK_SIZE = 16384;
     const PIN = Math.floor(100000 + Math.random() * 900000).toString();
     
-    // Исправление: добавили STUN серверы Google для пробития сети
+    // ИСПРАВЛЕНИЕ СЕТИ: Стабилизируем подключение к серверу
     const peer = new Peer('dropix-' + PIN, {
+        host: '0.peerjs.com',
+        port: 443,
+        secure: true,
+        pingInterval: 5000,
         config: {
             'iceServers': [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:global.stun.twilio.com:3478' } // Запасной STUN
             ]
         }
     });
@@ -165,10 +166,7 @@
     }
 
     function renderQR() {
-        if (typeof QRious === 'undefined') {
-            setTimeout(renderQR, 50);
-            return;
-        }
+        if (typeof QRious === 'undefined') { setTimeout(renderQR, 50); return; }
         try {
             let baseUrl = window.location.href.split('?')[0];
             if (baseUrl.startsWith('file://')) baseUrl = 'https://ktoto1300.github.io/Dropix/';
@@ -178,15 +176,27 @@
 
     renderQR();
 
+    // Логика сети и переподключения
     peer.on('open', (id) => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const joinId = urlParams.get('join');
+        document.getElementById('online-dot').classList.add('online');
+        const joinId = new URLSearchParams(window.location.search).get('join');
         if (joinId && joinId !== PIN) setTimeout(() => connectToPeer(joinId), 500);
     });
 
+    peer.on('disconnected', () => {
+        document.getElementById('online-dot').classList.remove('online');
+        console.log("Обрыв связи с сервером. Переподключаемся...");
+        peer.reconnect(); // Автоматическое переподключение
+    });
+
     peer.on('error', (err) => {
-        console.error("PeerJS Error:", err);
-        showToast("Ошибка сети: не удалось подключиться");
+        console.warn("Peer Error:", err.type);
+        if (err.type === 'network') {
+            document.getElementById('online-dot').classList.remove('online');
+            // Убрал бесячий тост при старте, он просто тихо попробует снова
+        } else if (err.type === 'unavailable-id') {
+            showToast("Критическая ошибка: ID занят");
+        }
     });
 
     peer.on('connection', (conn) => {
@@ -247,12 +257,8 @@
             setupConn();
             showToast("Готов к передаче!");
         });
-        connection.on('error', (e) => {
-            showToast("Ошибка подключения");
-        });
     }
 
-    /* Исправление: Логика ПИН-кода (ввод только цифр + удаление Backspace'ом) */
     function showPinModal() { 
         document.getElementById('pinModal').style.display = 'flex'; 
         setTimeout(() => document.querySelectorAll('.pin-cell')[0].focus(), 100);
@@ -260,7 +266,7 @@
     function hidePinModal() { document.getElementById('pinModal').style.display = 'none'; }
     
     function moveNext(el, i) { 
-        el.value = el.value.replace(/[^0-9]/g, ''); // режем все кроме цифр
+        el.value = el.value.replace(/[^0-9]/g, '');
         if (el.value.length === 1 && i < 5) document.querySelectorAll('.pin-cell')[i+1].focus();
     }
     
@@ -284,15 +290,36 @@
         navigator.clipboard.writeText(baseUrl + "?join=" + PIN).then(() => showToast("Ссылка скопирована!"));
     }
 
+    // ИСПРАВЛЕНИЕ СКАНЕРА: Максимальная зона охвата и автофокус
     function showScanner() {
         document.getElementById('scanner-overlay').style.display = 'block';
         html5QrCode = new Html5Qrcode("reader");
-        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
+        
+        const cameraConfig = {
+            facingMode: "environment",
+            advanced: [{ focusMode: "continuous" }] // Просим камеру постоянно фокусироваться
+        };
+
+        const scanConfig = {
+            fps: 15,
+            qrbox: function(viewfinderWidth, viewfinderHeight) {
+                // Рамка будет занимать 80% экрана, ловить QR стало в разы легче
+                let minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                let size = Math.floor(minEdge * 0.8);
+                return { width: size, height: size };
+            },
+            aspectRatio: 1.0
+        };
+
+        html5QrCode.start(cameraConfig, scanConfig, (text) => {
             try {
                 const id = new URL(text).searchParams.get('join');
                 if (id) { stopScanner(); connectToPeer(id); }
             } catch(e) { showToast("Неверный QR"); }
-        }).catch(() => showToast("Ошибка камеры"));
+        }).catch((err) => {
+            showToast("Ошибка доступа к камере");
+            console.error(err);
+        });
     }
     
     function stopScanner() { 
