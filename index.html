@@ -37,7 +37,6 @@
         
         #qr-canvas { margin: 1.5rem auto; display: block; width: 200px; height: 200px; background: #fff; border-radius: 12px; border: 1px solid #eee; }
         
-        /* Контейнер для кода и иконки скопировать */
         .code-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-bottom: 1.5rem; }
         .code-display { font-size: 2.5rem; font-weight: 800; letter-spacing: 5px; color: var(--text); margin: 0; }
         
@@ -80,7 +79,6 @@
         .toast.show { bottom: 40px; }
         .hidden { display: none; }
         
-        /* Индикатор онлайна */
         .status-dot {
             display: inline-block; width: 12px; height: 12px; border-radius: 50%;
             background: #e74c3c; margin-right: 10px; transition: 0.3s;
@@ -97,7 +95,7 @@
 
 <div class="card">
     <div class="header">
-        <h1><span class="status-dot" id="online-dot" title="Ожидание сети..."></span>Dropix</h1>
+        <h1><span class="status-dot" id="online-dot" title="Ожидание подключения к серверу..."></span>Dropix</h1>
     </div>
     <canvas id="qr-canvas"></canvas>
     
@@ -155,7 +153,6 @@
     const CHUNK_SIZE = 16384;
     const PIN = Math.floor(100000 + Math.random() * 900000).toString();
     
-    // Убрана жесткая привязка к хосту, чтобы библиотека сама искала свободные сервера
     const peer = new Peer('dropix-' + PIN, {
         config: {
             'iceServers': [
@@ -198,14 +195,21 @@
 
     peer.on('disconnected', () => {
         document.getElementById('online-dot').classList.remove('online');
-        document.getElementById('online-dot').title = "Переподключение...";
-        peer.reconnect();
+        document.getElementById('online-dot').title = "Потеряно соединение с сервером. Переподключение...";
+        setTimeout(() => {
+            if (!peer.destroyed) peer.reconnect();
+        }, 3000);
     });
 
+    // ВОЗВРАЩЕНЫ АДЕКВАТНЫЕ ОШИБКИ ДЛЯ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ
     peer.on('error', (err) => {
         document.getElementById('online-dot').classList.remove('online');
         if (err.type === 'network') {
-            showToast("Блокировка сети! Выключи VPN или AdBlock");
+            showToast("Ошибка сети. Проверьте подключение.");
+        } else if (err.type === 'peer-unavailable') {
+            showToast("Устройство не найдено. Проверьте код.");
+        } else {
+            showToast("Ошибка подключения: " + err.type);
         }
     });
 
@@ -231,9 +235,9 @@
                 a.href = URL.createObjectURL(blob);
                 a.download = incomingFile.name;
                 a.click();
-                showToast("Файл получен!");
-                updateP(100, "Готов к новой передаче");
-                setTimeout(() => updateP(0, "Готов"), 2000);
+                showToast("Файл успешно получен!");
+                updateP(100, "Завершено");
+                setTimeout(() => updateP(0, "Готов к передаче"), 2000);
             }
         });
     }
@@ -251,8 +255,8 @@
             if (offset % (CHUNK_SIZE * 50) === 0) await new Promise(r => setTimeout(r, 5));
         }
         connection.send({ type: 'eof' });
-        showToast("Отправлено!");
-        setTimeout(() => updateP(0, "Готов"), 2000);
+        showToast("Файл успешно отправлен!");
+        setTimeout(() => updateP(0, "Готов к передаче"), 2000);
     }
 
     function updateP(v, t) {
@@ -265,11 +269,10 @@
         connection = peer.connect('dropix-' + id, { reliable: true });
         connection.on('open', () => {
             setupConn();
-            showToast("Готов к передаче!");
+            showToast("Соединение установлено!");
         });
     }
 
-    /* ИНТЕРФЕЙС И ВВОД ПИН-КОДА */
     function showPinModal() { 
         document.getElementById('pinModal').style.display = 'flex'; 
         setTimeout(() => document.querySelectorAll('.pin-cell')[0].focus(), 100);
@@ -281,7 +284,6 @@
         if (el.value.length === 1 && i < 5) document.querySelectorAll('.pin-cell')[i+1].focus();
     }
     
-    // Обработка стрелок и удаления
     function handleKey(e, i) {
         const cells = document.querySelectorAll('.pin-cell');
         if (e.key === 'Backspace' && e.target.value === '' && i > 0) {
@@ -294,7 +296,6 @@
         }
     }
 
-    // Обработка вставки сразу 6 цифр
     function handlePaste(e) {
         e.preventDefault();
         const pasteData = (e.clipboardData || window.clipboardData).getData('text').replace(/[^0-9]/g, '');
@@ -311,7 +312,7 @@
     function confirmPin() {
         const pin = Array.from(document.querySelectorAll('.pin-cell')).map(i => i.value).join('');
         if (pin.length === 6) { hidePinModal(); connectToPeer(pin); }
-        else { showToast("Введите все 6 цифр!"); }
+        else { showToast("Введите код полностью"); }
     }
 
     function copyPinOnly() {
@@ -324,7 +325,6 @@
         navigator.clipboard.writeText(baseUrl + "?join=" + PIN).then(() => showToast("Ссылка скопирована!"));
     }
 
-    /* СКАНЕР */
     function showScanner() {
         document.getElementById('scanner-overlay').style.display = 'block';
         html5QrCode = new Html5Qrcode("reader");
@@ -336,8 +336,8 @@
             try {
                 const id = new URL(text).searchParams.get('join');
                 if (id) { stopScanner(); connectToPeer(id); }
-            } catch(e) { showToast("Неверный QR"); }
-        }).catch((err) => { showToast("Ошибка камеры"); });
+            } catch(e) { showToast("Неверный QR-код"); }
+        }).catch((err) => { showToast("Нет доступа к камере"); });
     }
     
     function stopScanner() { 
@@ -352,7 +352,7 @@
                 const id = new URL(text).searchParams.get('join');
                 if (id) { stopScanner(); connectToPeer(id); }
             } catch(e) {}
-        }).catch(() => showToast("QR не найден на фото"));
+        }).catch(() => showToast("QR-код не найден на изображении"));
     };
 </script>
 
