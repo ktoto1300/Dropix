@@ -6,7 +6,6 @@
     <title>Dropix — P2P Transfer</title>
     <meta name="theme-color" content="#2ecc71">
     
-    <!-- Библиотеки -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
@@ -155,37 +154,48 @@
         setTimeout(() => t.classList.remove('show'), 3000);
     }
 
-    // Рендер QR
+    // ИСПРАВЛЕНИЕ: Рисуем QR сразу, не дожидаясь ответа от сервера PeerJS
     function renderQR() {
         if (typeof QRious === 'undefined') {
-            setTimeout(renderQR, 100);
+            setTimeout(renderQR, 50); // Если библиотека не успела загрузиться, проверяем каждые 50мс
             return;
         }
         try {
-            const baseUrl = window.location.href.split('?')[0];
+            let baseUrl = window.location.href.split('?')[0];
+            // Защита от локальных путей (чтобы QR не ломался при открытии файла напрямую)
+            if (baseUrl.startsWith('file://')) {
+                baseUrl = 'https://ktoto1300.github.io/Dropix/';
+            }
             const fullLink = baseUrl + "?join=" + PIN;
+            
             new QRious({
                 element: document.getElementById('qr-canvas'),
                 value: fullLink,
                 size: 200,
                 level: 'M'
             });
-            console.log("QR Rendered for:", fullLink);
-        } catch(e) { console.error("QR Error", e); }
+        } catch(e) { 
+            console.error("QR Error", e); 
+        }
     }
 
+    // Вызываем отрисовку моментально
+    renderQR();
+
     peer.on('open', (id) => {
-        renderQR();
         // Авто-подключение по параметру join
         const urlParams = new URLSearchParams(window.location.search);
         const joinId = urlParams.get('join');
         if (joinId && joinId !== PIN) {
-            // Небольшая задержка, чтобы PeerJS сервер успел зарегистрировать нас
             setTimeout(() => {
-                console.log("Attempting auto-connect to:", joinId);
                 connectToPeer(joinId);
             }, 500);
         }
+    });
+
+    peer.on('error', (err) => {
+        console.error(err);
+        showToast("Ошибка сети: проверь интернет");
     });
 
     peer.on('connection', (conn) => {
@@ -211,6 +221,8 @@
                 a.download = incomingFile.name;
                 a.click();
                 showToast("Файл получен!");
+                updateP(100, "Готов к новой передаче");
+                setTimeout(() => updateP(0, "Готов"), 2000);
             }
         });
     }
@@ -219,16 +231,23 @@
         if (!connection) return;
         connection.send({ type: 'metadata', name: file.name, mime: file.type, size: file.size });
         let offset = 0;
+        
         while (offset < file.size) {
             const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
             connection.send({ type: 'chunk', chunk: chunk });
             offset += CHUNK_SIZE;
+            
             const p = Math.floor((offset / file.size) * 100);
             updateP(p, `Отправка: ${p}%`);
-            if (offset % (CHUNK_SIZE * 20) === 0) await new Promise(r => setTimeout(r, 10));
+            
+            // Защита от зависания вкладки при отправке тяжелых видео
+            if (offset % (CHUNK_SIZE * 50) === 0) {
+                await new Promise(r => setTimeout(r, 5));
+            }
         }
         connection.send({ type: 'eof' });
         showToast("Отправлено!");
+        setTimeout(() => updateP(0, "Готов"), 2000);
     }
 
     function updateP(v, t) {
@@ -258,7 +277,8 @@
     }
 
     function copyDropLink() {
-        const baseUrl = window.location.href.split('?')[0];
+        let baseUrl = window.location.href.split('?')[0];
+        if (baseUrl.startsWith('file://')) baseUrl = 'https://ktoto1300.github.io/Dropix/';
         const url = baseUrl + "?join=" + PIN;
         navigator.clipboard.writeText(url).then(() => showToast("Ссылка скопирована!"));
     }
@@ -274,16 +294,26 @@
             } catch(e) { showToast("Неверный QR"); }
         }).catch(() => showToast("Ошибка камеры"));
     }
-    function stopScanner() { if (html5QrCode) html5QrCode.stop().then(() => document.getElementById('scanner-overlay').style.display = 'none'); }
+    
+    function stopScanner() { 
+        if (html5QrCode) {
+            html5QrCode.stop().then(() => {
+                document.getElementById('scanner-overlay').style.display = 'none';
+            }).catch(() => {
+                document.getElementById('scanner-overlay').style.display = 'none';
+            });
+        }
+    }
 
     document.getElementById('fileInput').onchange = (e) => { if (e.target.files[0]) sendFile(e.target.files[0]); };
     document.getElementById('qrFileInput').onchange = (e) => {
+        if (!e.target.files[0]) return;
         new Html5Qrcode("reader").scanFile(e.target.files[0], true).then(text => {
             try {
                 const id = new URL(text).searchParams.get('join');
                 if (id) { stopScanner(); connectToPeer(id); }
             } catch(e) {}
-        });
+        }).catch(() => showToast("QR не найден на фото"));
     };
 </script>
 
